@@ -5,6 +5,8 @@ import games.brennan.playermob.entity.goal.CollectFloorItemsGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
+import games.brennan.playermob.entity.goal.HarvestCropsGoal;
+import games.brennan.playermob.entity.goal.HuntForFoodGoal;
 import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
@@ -312,6 +314,11 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         this.goalSelector.addGoal(3, new RaidContainersGoal(this, /* speed */ 0.9, /* radius */ 12));
         this.goalSelector.addGoal(3, new RaidArmorStandsGoal(this, /* speed */ 0.9, /* radius */ 12.0));
         this.goalSelector.addGoal(3, new CollectFloorItemsGoal(this, /* speed */ 0.9, /* radius */ 8.0));
+        // Low-priority idle forage drive: only farms ripe crops when there's
+        // nothing more urgent (combat 2, raid/eat/collect 3) to do. Hunting is
+        // NOT here — it runs as a target goal so the priority-2 attack goal does
+        // the killing (see below).
+        this.goalSelector.addGoal(6, new HarvestCropsGoal(this, /* speed */ 0.9, /* radius */ 8));
         this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 0.6));
         this.goalSelector.addGoal(9, new LookAtPlayerGoal(this, LivingEntity.class, 8.0F));
         this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
@@ -324,6 +331,9 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
             true,
             false,
             candidate -> personalityToward(candidate) == Personality.AGGRESSIVE));
+        // Hunt food animals only while hungry, and below the hostile-targeting
+        // goal (2) so defending against a zombie always beats chasing a cow.
+        this.targetSelector.addGoal(3, new HuntForFoodGoal(this));
     }
 
     /**
@@ -1017,7 +1027,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
         return requested - leftover.getCount();
     }
 
-    // ---- Food helpers (called from EatFoodGoal) --------------------------
+    // ---- Food helpers (called from EatFoodGoal + the forage goals) -------
 
     /**
      * Returns the inventory slot of the highest-nutrition food currently
@@ -1042,6 +1052,58 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
+     * Whether the mob currently wants to go acquire food — the single trigger
+     * for the forage drive ({@link HarvestCropsGoal} harvests crops,
+     * {@link HuntForFoodGoal} hunts animals, and the existing raid goal loots
+     * chests). Health-scaled: a mob with no food always wants some; a hurt mob
+     * keeps topping up to a healing buffer; a full-health mob with food is
+     * content. See {@link ForagePolicy#wantsFood}.
+     */
+    public boolean wantsFood() {
+        boolean hasFood = findBestFoodSlot() >= 0;
+        return ForagePolicy.wantsFood(hasFood, carriedFoodNutrition(), getHealth(), getMaxHealth());
+    }
+
+    /** Total nutrition (food points) across every food stack in the backpack. */
+    private int carriedFoodNutrition() {
+        int total = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food != null) total += food.nutrition() * stack.getCount();
+        }
+        return total;
+    }
+
+    /** Radius (blocks) the mob looks for already-dropped food before it hunts more. */
+    private static final double FOOD_SCAN_RADIUS = 10.0;
+
+    /**
+     * True when the mob already has an immediate way to deal with its hunger and
+     * shouldn't go hunt <em>more</em> food: either edible items are lying on the
+     * ground nearby (the {@link CollectFloorItemsGoal} will fetch them) or it's
+     * carrying food while hurt enough that {@link EatFoodGoal} will eat it.
+     *
+     * <p>{@link HuntForFoodGoal} consults this so that after a kill the mob
+     * stands down and lets the collect → eat loop run, instead of immediately
+     * chaining to the next animal — which, being combat at priority 2, would
+     * preempt the priority-3 collect/eat goals and leave the meat on the ground
+     * (the mob would stay hungry forever). The ground scan deliberately ignores
+     * the brief post-drop pickup delay so a just-killed animal's meat counts
+     * right away and hunting doesn't re-fire in that window.</p>
+     */
+    public boolean hasImmediateFoodSource() {
+        if (findBestFoodSlot() >= 0
+                && getHealth() < getMaxHealth() * EatFoodGoal.HUNGER_THRESHOLD) {
+            return true;
+        }
+        AABB box = getBoundingBox().inflate(FOOD_SCAN_RADIUS);
+        return !level().getEntitiesOfClass(ItemEntity.class, box,
+            e -> e.isAlive() && ForagePolicy.isEdible(e.getItem())).isEmpty();
+    }
+
+    /**
      * Spawn server-broadcast item-puff particles near the mob's mouth —
      * the visual feedback for "this mob is eating right now". Client-side
      * {@link Level#addParticle} won't reach other players, so we use
@@ -1054,7 +1116,13 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      */
     public void spawnEatingParticles(ItemStack food) {
         if (!(level() instanceof ServerLevel serverLevel)) return;
-        ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM, food);
+        // Snapshot with copy(): ItemParticleOption keeps a live reference and the
+        // packet encodes later on the Netty IO thread. EatFoodGoal shrinks the
+        // offhand stack to empty on the final eat tick — the very tick the last
+        // particle fires — and an empty ItemStack fails to encode ("Empty
+        // ItemStack not allowed"), which can disconnect an integrated-server
+        // client. Copying decouples the particle from that mutation.
+        ItemParticleOption particle = new ItemParticleOption(ParticleTypes.ITEM, food.copy());
         serverLevel.sendParticles(
             particle,
             getX(),
