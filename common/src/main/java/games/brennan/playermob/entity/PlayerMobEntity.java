@@ -47,6 +47,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.SpawnGroupData;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
@@ -61,7 +62,6 @@ import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.npc.InventoryCarrier;
 import net.minecraft.world.entity.player.Player;
@@ -93,7 +93,7 @@ import java.util.UUID;
 
 /**
  * The PlayerMob entity. Player-shaped (rendered with vanilla PlayerModel via
- * the client renderer) but driven by a vanilla-mob {@link Monster} AI brain.
+ * the client renderer) but driven by a vanilla-mob {@link PathfinderMob} AI brain.
  *
  * <p><b>Combat</b> is weapon-aware — see {@link WeaponAwareAttackGoal}. The
  * mob supports crossbows, bows, and any melee weapon (or fists) depending on
@@ -137,7 +137,7 @@ import java.util.UUID;
  * <p><b>Spawning</b> — spawn egg + {@code /summon playermob:player_mob}
  * only. No natural spawns, no raid hooks.</p>
  */
-public class PlayerMobEntity extends Monster implements CrossbowAttackMob, InventoryCarrier {
+public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob, InventoryCarrier {
 
     // ---- DataTracker ------------------------------------------------------
 
@@ -262,6 +262,12 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
 
     public PlayerMobEntity(EntityType<? extends PlayerMobEntity> type, Level level) {
         super(type, level);
+        // Preserve combat-kill XP parity. Monster's constructor sets xpReward=5;
+        // PathfinderMob's does not, so without this killing a PlayerMob would
+        // drop 0 XP. The base-class swap (Monster -> PathfinderMob) is purely to
+        // shed the Enemy marker so iron golems ignore it — XP-on-kill is not part
+        // of that intended change, so restore it explicitly.
+        this.xpReward = 5;
         // Enable vanilla's passive proximity pickup (Mob.aiStep). The active
         // CollectFloorItemsGoal does the seeking; this catches items underfoot.
         this.setCanPickUpLoot(true);
@@ -279,7 +285,7 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
      * {@code /item replace entity ... armor.chest with minecraft:iron_chestplate}.
      */
     public static AttributeSupplier.Builder createAttributes() {
-        return Monster.createMonsterAttributes()
+        return PathfinderMob.createMobAttributes()
             .add(Attributes.MAX_HEALTH, 20.0)
             .add(Attributes.MOVEMENT_SPEED, 0.30)
             .add(Attributes.ATTACK_DAMAGE, 3.0)
@@ -1672,9 +1678,13 @@ public class PlayerMobEntity extends Monster implements CrossbowAttackMob, Inven
     }
 
     /**
-     * Returning Enemy from {@code instanceof} checks is already provided
-     * by the {@link Monster} superclass — this entity is automatically a
-     * valid target for {@link NearestAttackableTargetGoal} filters that
-     * test for {@link Enemy}.
+     * Deliberately extends {@link PathfinderMob}, NOT {@code Monster} — so this
+     * entity does <em>not</em> implement the {@link Enemy} marker interface.
+     * Iron golems (and other {@code Enemy}-seeking mobs) therefore ignore it on
+     * sight instead of attacking it like a real pillager. As a side effect,
+     * PlayerMobs no longer treat one another as targets, since the
+     * {@link Stance} predicate keys off {@code instanceof Enemy}. Combat against
+     * genuine hostile mobs is unaffected — those are still {@code Enemy}
+     * instances and remain valid targets.
      */
 }
