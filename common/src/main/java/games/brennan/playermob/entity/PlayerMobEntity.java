@@ -14,6 +14,7 @@ import games.brennan.playermob.entity.goal.PlayerMobDoorGoal;
 import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.skin.PlayerMobSkin;
 import games.brennan.playermob.skin.PlayerMobSkinRegistry;
@@ -201,6 +202,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final long RECENTLY_EXPLORED_TTL_TICKS = 1200L;
 
     /**
+     * How long after leaving a Dungeon Train a PlayerMob still counts as "fell
+     * off" and will try to climb back on — see {@link TrainRecoveryGoal}. 200
+     * ticks (10s) is generous enough to start recovery after a fall, tight enough
+     * that a mob doesn't board a train it merely brushed past long ago.
+     */
+    public static final int RECOVERY_WINDOW_TICKS = 200;
+
+    /**
      * Chest {@code triggerEvent} ID for "viewer count changed" — drives the
      * lid animation. See {@link ChestBlockEntity#triggerEvent}.
      */
@@ -262,6 +271,24 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * persistence rather than a synched DataTracker entry.</p>
      */
     private boolean closesDoors;
+
+    /**
+     * Server tick of the last moment this mob stood on a train carriage, or a
+     * large negative sentinel if it never has. Drives {@link #ticksSinceOnTrain}
+     * so {@link TrainRecoveryGoal} fires only for a mob that actually fell off a
+     * train. Transient (not saved) — a reloaded mob just isn't "recovering" until
+     * it rides again.
+     */
+    private int lastOnTrainTick = -100_000;
+
+    /**
+     * True only while {@link TrainRecoveryGoal} is actively climbing this mob back
+     * onto a train (set on the goal's start, cleared on stop). Off the train, recovery
+     * is the mob's <em>sole</em> focus — this flag suppresses combat (target
+     * acquisition + held targets) so it never breaks off to chase a mob mid-recovery.
+     * Transient server-only AI state.
+     */
+    private boolean recovering;
 
     /**
      * Fixed march direction while exploring a Dungeon Train: {@code -1} toward
@@ -327,6 +354,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         if (this.getNavigation() instanceof GroundPathNavigation groundNav) {
             groundNav.setCanOpenDoors(true);
         }
+        // Let the path cross water (float on the surface) instead of treating it as a
+        // wall — so a mob recovering back onto a train can swim toward it / to the
+        // nearest shore. FloatGoal (priority 0) keeps it from sinking.
+        this.getNavigation().setCanFloat(true);
     }
 
     /**
@@ -354,6 +385,10 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        // Fell off a Dungeon Train carriage? Getting back on preempts everything
+        // but swimming — added before the other priority-1 goals so its canUse is
+        // evaluated first. No-op without a train mod (nearestCarriage → null).
+        this.goalSelector.addGoal(1, new TrainRecoveryGoal(this, /* speed */ 1.0));
         // Personality social goals — priority 1 so they preempt raiding/strolling
         // when their disposition applies. Each self-gates on the live personality;
         // Skeptical/Friendly also gate on "no target" so they yield to combat.
@@ -397,8 +432,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             10,
             true,
             false,
-            candidate -> personalityToward(candidate) == Personality.AGGRESSIVE
+            candidate -> !recovering
                 && !this.crossingGap
+                && personalityToward(candidate) == Personality.AGGRESSIVE
                 && TrainConfinement.allowsTarget(this, candidate)));
         // Hunt food animals only while hungry, and below the hostile-targeting
         // goal (2) so defending against a zombie always beats chasing a cow.
@@ -427,8 +463,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void customServerAiStep() {
         super.customServerAiStep();
         LivingEntity target = getTarget();
-        if (target != null && (isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
-            setTarget(null);
+        if (target != null
+                && (recovering || isIgnoredPlayer(target) || !TrainConfinement.allowsTarget(this, target))) {
+            setTarget(null);   // recovering back onto a train preempts all combat
         }
         latchTrainExploreDirection();
 
@@ -439,6 +476,9 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         }
 
         if (TrainConfinement.isConfined(this)) {
+            // Remember we're aboard, so TrainRecoveryGoal can tell "fell off" from
+            // "never boarded" (see ticksSinceOnTrain / RECOVERY_WINDOW_TICKS).
+            lastOnTrainTick = tickCount;
             // Open any door we're up against — and, when wedged, close one whose open swing is
             // blocking us. Vanilla's DoorInteractGoal opens doors by inspecting nav path nodes +
             // collision, which doesn't fire on a moving Sable carriage — so the train seam reaches
@@ -501,12 +541,68 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     }
 
     /**
+     * Ticks since this mob was last on a train carriage (large when it never has).
+     * {@link TrainRecoveryGoal} compares it against {@link #RECOVERY_WINDOW_TICKS}
+     * so recovery fires only for a mob that recently fell off a train.
+     */
+    public int ticksSinceOnTrain() {
+        return tickCount - lastOnTrainTick;
+    }
+
+    /**
+     * Marks whether {@link TrainRecoveryGoal} is actively recovering this mob (set on
+     * its start, cleared on its stop). While {@code true}, combat is suppressed so
+     * getting back aboard is the mob's only focus (see {@link #recovering}).
+     */
+    public void setRecovering(boolean recovering) {
+        this.recovering = recovering;
+    }
+
+    /** True while actively climbing back onto a train (see {@link #recovering}). */
+    public boolean isRecovering() {
+        return this.recovering;
+    }
+
+    /**
      * Set by {@link CrossGroupGapGoal} for the duration of a cross-gap leap. While
      * {@code true}, the mob declines new combat targets so the leap can't be preempted.
      * See {@link #crossingGap}.
      */
     public void setCrossingGap(boolean crossingGap) {
         this.crossingGap = crossingGap;
+    }
+
+    /**
+     * Auto-equip the best tool the mob owns for breaking {@code state} (highest
+     * {@link ItemStack#getDestroySpeed}), swapping it into the main hand and
+     * stashing the displaced item. Returns {@code true} if a swap happened — so the
+     * caller can add a short "reach for the tool" pause. No-op (returns {@code false})
+     * when the main hand is already the fastest, or nothing beats an empty hand.
+     */
+    public boolean equipBetterToolFor(BlockState state) {
+        float bestSpeed = getMainHandItem().getDestroySpeed(state);
+        int bestSlot = -1;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack candidate = inventory.getItem(i);
+            if (candidate.isEmpty()) continue;
+            float speed = candidate.getDestroySpeed(state);
+            if (speed > bestSpeed) {
+                bestSpeed = speed;
+                bestSlot = i;
+            }
+        }
+        if (bestSlot < 0) {
+            return false;
+        }
+        ItemStack tool = inventory.getItem(bestSlot).copy();
+        ItemStack previous = getMainHandItem();
+        inventory.setItem(bestSlot, ItemStack.EMPTY);
+        setItemSlot(EquipmentSlot.MAINHAND, tool);
+        if (!previous.isEmpty()) {
+            ItemStack leftover = EquipmentEvaluator.addToContainer(inventory, previous);
+            if (!leftover.isEmpty()) spawnAtLocation(leftover);
+        }
+        return true;
     }
 
     /**
