@@ -5,7 +5,9 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "MobTargetSelectorAccessor",
-    "RaiderTargetsPlayerMobMixin"
+    "PlayerDeathMixin",
+    "RaiderTargetsPlayerMobMixin",
+    "LivingHurtWitnessMixin"
   ],
   "client": [],
   "server": [],

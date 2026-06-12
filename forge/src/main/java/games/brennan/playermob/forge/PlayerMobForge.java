@@ -2,9 +2,10 @@ package games.brennan.playermob.forge;
 
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
-import games.brennan.playermob.entity.Personality;
+import games.brennan.playermob.entity.Archetype;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.player.ReincarnateCommand;
 import games.brennan.playermob.skin.PlayerMobSkinReloadListener;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -19,6 +20,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.extensions.IForgeMenuType;
 import net.minecraftforge.event.AddReloadListenerEvent;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.entity.EntityAttributeCreationEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
@@ -33,7 +35,7 @@ import net.minecraftforge.registries.RegistryObject;
  * registration lives per-loader using Forge's DeferredRegister.
  *
  * <p>Registers the entity type, the random spawn egg, and the five player-facing
- * personality archetype eggs (in a static block); egg colours / {@code entity_data}
+ * archetype eggs (in a static block); egg colour / {@code entity_data}
  * are built by {@link PlayerMobRegistry}. The archetype eggs are looked back up
  * from the item registry at creative-tab time, which avoids threading their
  * {@link RegistryObject} generics through a collection.</p>
@@ -56,12 +58,12 @@ public final class PlayerMobForge {
         ITEMS.register(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG_PATH, () ->
             PlayerMobRegistry.createRandomSpawnEgg(PLAYER_MOB.get()));
 
-    // Player-facing archetype eggs — one per personality. Registered for their
+    // Player-facing archetype eggs — one per preset. Registered for their
     // side effect; resolved from BuiltInRegistries at tab-build time.
     static {
-        for (Personality personality : Personality.values()) {
-            ITEMS.register(PlayerMobRegistry.personalitySpawnEggPath(personality), () ->
-                PlayerMobRegistry.createPersonalitySpawnEgg(PLAYER_MOB.get(), personality));
+        for (Archetype archetype : Archetype.values()) {
+            ITEMS.register(PlayerMobRegistry.archetypeSpawnEggPath(archetype), () ->
+                PlayerMobRegistry.createArchetypeSpawnEgg(PLAYER_MOB.get(), archetype));
         }
     }
 
@@ -79,8 +81,9 @@ public final class PlayerMobForge {
         modBus.addListener(PlayerMobForge::onBuildCreativeTab);
         modBus.addListener(PlayerMobForge::onCommonSetup);
 
-        // Reload listeners live on the game bus, not the mod bus.
+        // Reload listeners + commands live on the game bus, not the mod bus.
         MinecraftForge.EVENT_BUS.addListener(PlayerMobForge::onAddReloadListeners);
+        MinecraftForge.EVENT_BUS.addListener(PlayerMobForge::onRegisterCommands);
 
         if (FMLEnvironment.dist == Dist.CLIENT) {
             games.brennan.playermob.forge.client.PlayerMobForgeClient.register(modBus);
@@ -95,6 +98,10 @@ public final class PlayerMobForge {
         event.addListener(new PlayerMobSkinReloadListener());
     }
 
+    private static void onRegisterCommands(RegisterCommandsEvent event) {
+        ReincarnateCommand.register(event.getDispatcher());
+    }
+
     private static void onEntityAttributeCreation(EntityAttributeCreationEvent event) {
         event.put(PLAYER_MOB.get(), PlayerMobEntity.createAttributes().build());
     }
@@ -102,9 +109,9 @@ public final class PlayerMobForge {
     private static void onBuildCreativeTab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.SPAWN_EGGS) {
             event.accept(PLAYER_MOB_SPAWN_EGG.get());
-            for (Personality personality : Personality.values()) {
+            for (Archetype archetype : Archetype.values()) {
                 event.accept(BuiltInRegistries.ITEM.get(
-                    PlayerMobRegistry.personalitySpawnEggId(personality)));
+                    PlayerMobRegistry.archetypeSpawnEggId(archetype)));
             }
         }
     }

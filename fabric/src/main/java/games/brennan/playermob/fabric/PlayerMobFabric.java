@@ -2,10 +2,12 @@ package games.brennan.playermob.fabric;
 
 import games.brennan.playermob.PlayerMob;
 import games.brennan.playermob.PlayerMobRegistry;
-import games.brennan.playermob.entity.Personality;
+import games.brennan.playermob.entity.Archetype;
 import games.brennan.playermob.entity.PlayerMobEntity;
 import games.brennan.playermob.menu.PlayerMobMenu;
+import games.brennan.playermob.player.ReincarnateCommand;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
@@ -26,7 +28,7 @@ import net.minecraft.world.item.CreativeModeTabs;
  *
  * <p>Egg colours, the {@code entity_data} payload, and the {@code SpawnEggItem}
  * construction all live in {@link PlayerMobRegistry} so the three loaders share
- * one source of truth — see {@link PlayerMobRegistry#createPersonalitySpawnEgg}.</p>
+ * one source of truth — see {@link PlayerMobRegistry#createArchetypeSpawnEgg}.</p>
  */
 public final class PlayerMobFabric implements ModInitializer {
 
@@ -53,20 +55,20 @@ public final class PlayerMobFabric implements ModInitializer {
             PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG_ID,
             PlayerMobRegistry.createRandomSpawnEgg(entityType));
 
-        // Player-facing archetype eggs — one per personality.
-        for (Personality personality : Personality.values()) {
+        // Player-facing archetype eggs — one per preset.
+        for (Archetype archetype : Archetype.values()) {
             Registry.register(
                 BuiltInRegistries.ITEM,
-                PlayerMobRegistry.personalitySpawnEggId(personality),
-                PlayerMobRegistry.createPersonalitySpawnEgg(entityType, personality));
+                PlayerMobRegistry.archetypeSpawnEggId(archetype),
+                PlayerMobRegistry.createArchetypeSpawnEgg(entityType, archetype));
         }
 
         // Drop every egg into the Spawn Eggs creative tab.
         ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> {
             entries.accept(PlayerMobRegistry.PLAYER_MOB_SPAWN_EGG);
-            for (Personality personality : Personality.values()) {
+            for (Archetype archetype : Archetype.values()) {
                 entries.accept(BuiltInRegistries.ITEM.get(
-                    PlayerMobRegistry.personalitySpawnEggId(personality)));
+                    PlayerMobRegistry.archetypeSpawnEggId(archetype)));
             }
         });
 
@@ -92,6 +94,10 @@ public final class PlayerMobFabric implements ModInitializer {
         ResourceManagerHelper.get(PackType.SERVER_DATA)
             .registerReloadListener(
                 new games.brennan.playermob.fabric.SkinReloadListenerWrapper(skinListenerId));
+
+        // The /playermob command — reincarnation egg retrieval + live trait readout.
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+            ReincarnateCommand.register(dispatcher));
 
         PlayerMob.init();
     }

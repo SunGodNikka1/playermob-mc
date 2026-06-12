@@ -2,6 +2,7 @@ package games.brennan.playermob.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import games.brennan.playermob.entity.PlayerMobEntity;
+import games.brennan.playermob.player.SourceProfileSkin;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
@@ -14,6 +15,7 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
+import net.minecraft.client.resources.PlayerSkin;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
@@ -25,6 +27,8 @@ import net.minecraft.world.item.UseAnim;
 import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+
+import java.util.Optional;
 
 /**
  * Renders a {@link PlayerMobEntity} using the vanilla {@link PlayerModel} —
@@ -163,7 +167,7 @@ public final class PlayerMobRenderer
                        PoseStack poseStack, MultiBufferSource buffer, int packedLight) {
         // Pick THIS mob's arm model before anything reads it. Render layers go
         // through getModel() each frame, so the armor / held-item layers follow.
-        this.model = entity.isSkinSlim() ? slimModel : wideModel;
+        this.model = isSlimModel(entity) ? slimModel : wideModel;
         PlayerModel<PlayerMobEntity> model = this.getModel();
         model.crouching = entity.isCrouching();
         applyArmPoses(entity, model);
@@ -286,11 +290,26 @@ public final class PlayerMobRenderer
 
     @Override
     public ResourceLocation getTextureLocation(PlayerMobEntity entity) {
+        return resolveSkin(entity);
+    }
+
+    /**
+     * Resolve a PlayerMob's skin to a renderable texture — shared by
+     * {@link #getTextureLocation} and the menu UI (so a relationship row can draw
+     * a target PlayerMob's face). v2 prefers the Mojang URL skin (via
+     * {@link PlayerMobSkinTextures}, which returns {@code DefaultPlayerSkin} while
+     * the async fetch is in flight, then flips to the real texture once cached);
+     * otherwise the bundled vanilla default keyed off SkinIndex (v1 behaviour),
+     * clamped defensively to skin 0.
+     */
+    public static ResourceLocation resolveSkin(PlayerMobEntity entity) {
         String url = entity.getSkinTextureUrl();
+        // Reincarnation: resolve the source player's own skin via SkinManager.
+        Optional<SourceProfileSkin.Ref> source = SourceProfileSkin.decode(url);
+        if (source.isPresent()) {
+            return PlayerMobSkinTextures.playerSkin(source.get().uuid(), source.get().name()).texture();
+        }
         if (!url.isEmpty()) {
-            // v2: Mojang URL skin via SkinManager. Returns DefaultPlayerSkin
-            // while async fetch is in flight, then flips to the real texture
-            // once cached — that's the graceful offline / CDN-outage fallback.
             return PlayerMobSkinTextures.lookup(url, entity.isSkinSlim());
         }
         // No URL ⇒ legacy 0.2.0 mob, or registry-empty new mob. Render the
@@ -306,6 +325,20 @@ public final class PlayerMobRenderer
             return table[0];
         }
         return table[idx];
+    }
+
+    /**
+     * Whether to draw the slim (3-pixel-arm) body model. For a reincarnation skin the
+     * slim/wide choice comes from the resolved source-player skin — so it tracks the
+     * player's real model — otherwise from the mob's own synched slim flag.
+     */
+    private static boolean isSlimModel(PlayerMobEntity entity) {
+        Optional<SourceProfileSkin.Ref> source = SourceProfileSkin.decode(entity.getSkinTextureUrl());
+        if (source.isPresent()) {
+            return PlayerMobSkinTextures.playerSkin(source.get().uuid(), source.get().name()).model()
+                == PlayerSkin.Model.SLIM;
+        }
+        return entity.isSkinSlim();
     }
 
     /**
