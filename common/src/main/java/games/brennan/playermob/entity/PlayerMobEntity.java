@@ -12,6 +12,7 @@ import games.brennan.playermob.entity.goal.DefendLovedOneGoal;
 import games.brennan.playermob.entity.goal.DoorOperationGoal;
 import games.brennan.playermob.entity.goal.EatFoodGoal;
 import games.brennan.playermob.entity.goal.FleeFromCategoryGoal;
+import games.brennan.playermob.entity.goal.FollowLovedOneGoal;
 import games.brennan.playermob.entity.goal.FriendlyGreetGoal;
 import games.brennan.playermob.entity.goal.HarvestCropsGoal;
 import games.brennan.playermob.entity.goal.HuntForFoodGoal;
@@ -550,6 +551,13 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // shield in hand.
         this.goalSelector.addGoal(1, new BlockArrowsGoal(this));
         this.goalSelector.addGoal(2, new WeaponAwareAttackGoal(this, 1.0, 8.0f));
+        // Follow the one it loves (a player or another PlayerMob): priority 2 so it
+        // deprioritises every own-task (raid 3, harvest 6, train-advance 7, stroll 8) to tag
+        // along, yet still yields to combat — registered after the attack goal and self-gated
+        // on "no target", so a target means fight and no target means follow. Joining its
+        // fights is then automatic: following parks the mob beside the loved one where the
+        // target goals acquire foes. See FollowLovedOneGoal / FollowLovedOnePolicy.
+        this.goalSelector.addGoal(2, new FollowLovedOneGoal(this));
         // EatFoodGoal added BEFORE the raid goals at the same priority so
         // its canUse() is evaluated first — a low-HP mob with food prefers
         // eating over walking to the next chest.
@@ -922,6 +930,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      */
     public void setCrossingGap(boolean crossingGap) {
         this.crossingGap = crossingGap;
+    }
+
+    /** True while actively leaping a Dungeon-Train group gap (see {@link #crossingGap}). */
+    public boolean isCrossingGap() {
+        return this.crossingGap;
     }
 
     /**
@@ -1360,6 +1373,53 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
             }
         }
         return closest;
+    }
+
+    // ---- Follow-loved-one support (FollowLovedOneGoal) --------------------
+
+    /**
+     * The entity this mob should follow because it has come to love it — the nearest,
+     * most-loved player or PlayerMob within {@link FollowLovedOnePolicy#SCAN_RANGE} (feeling
+     * ≥ {@link DispositionResolver#FEELING_LOVE} and {@link TrainConfinement#allowsTarget
+     * train-allowed}), or {@code null} if it has no one to follow. Drives
+     * {@code FollowLovedOneGoal} (which throttles how often it asks).
+     *
+     * <p><b>Mutual-love leadership:</b> a candidate PlayerMob that loves this mob back is
+     * skipped when this mob {@linkplain FollowLovedOnePolicy#leads leads} the pair (lower
+     * UUID) — so exactly one of a mutual pair chases and the other leads, letting them travel
+     * together instead of converging on each other. A loved player is never skipped.</p>
+     *
+     * <p>Only players and other PlayerMobs ever reach the love threshold, so a non-categorised
+     * entity's DEFAULT feeling keeps it out.</p>
+     */
+    public LivingEntity findFollowTarget() {
+        double range = FollowLovedOnePolicy.SCAN_RANGE;
+        AABB box = getBoundingBox().inflate(range);
+        double rangeSq = range * range;
+        LivingEntity best = null;
+        float bestFeeling = -1.0F;
+        double bestDistSq = Double.MAX_VALUE;
+        for (LivingEntity candidate : level().getEntitiesOfClass(LivingEntity.class, box)) {
+            if (candidate == this || !candidate.isAlive()) continue;
+            float feeling = feelingToward(candidate); // DEFAULT for non-player/-mob → never loved
+            if (feeling < DispositionResolver.FEELING_LOVE) continue;
+            if (!TrainConfinement.allowsTarget(this, candidate)) continue;
+            double distSq = distanceToSqr(candidate);
+            if (distSq > rangeSq) continue;
+            // Mutual-love leadership: don't follow a mob I lead — it follows me instead.
+            if (candidate instanceof PlayerMobEntity other
+                    && other.feelingToward(this) >= DispositionResolver.FEELING_LOVE
+                    && FollowLovedOnePolicy.leads(getUUID(), other.getUUID())) {
+                continue;
+            }
+            // Rank: strongest feeling first, nearest as the tiebreak.
+            if (feeling > bestFeeling || (feeling == bestFeeling && distSq < bestDistSq)) {
+                best = candidate;
+                bestFeeling = feeling;
+                bestDistSq = distSq;
+            }
+        }
+        return best;
     }
 
     // ---- Client-synced disposition (for the menu UI) ----------------------
