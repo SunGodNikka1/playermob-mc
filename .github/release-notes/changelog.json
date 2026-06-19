@@ -13,9 +13,9 @@
       ],
       "pr": 94,
       "date": "2026-06-18",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.43.0",
+      "released_at": "2026-06-19T09:00:44Z"
     },
     {
       "id": "train-follow-loved-player",
@@ -31,9 +31,9 @@
       ],
       "pr": 96,
       "date": "2026-06-18",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.43.0",
+      "released_at": "2026-06-19T09:00:44Z"
     },
     {
       "id": "reincarnation-echo-real-skin",
@@ -48,9 +48,9 @@
       ],
       "pr": 98,
       "date": "2026-06-19",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.43.0",
+      "released_at": "2026-06-19T09:00:44Z"
     }
   ]
 }
