@@ -3,6 +3,9 @@ package games.brennan.playermob.player;
 import com.mojang.authlib.minecraft.MinecraftProfileTexture;
 import com.mojang.logging.LogUtils;
 import games.brennan.playermob.PlayerMobRegistry;
+import games.brennan.playermob.compat.ReincarnationQuery;
+import games.brennan.playermob.compat.ReincarnationRecord;
+import games.brennan.playermob.compat.ReincarnationSources;
 import games.brennan.playermob.compat.TrainConfinement;
 import games.brennan.playermob.entity.DispositionResolver;
 import games.brennan.playermob.entity.PlayerMobEntity;
@@ -41,13 +44,16 @@ public final class PlayerReincarnation {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
-     * Chance that a Dungeon-Train ({@link net.minecraft.world.entity.MobSpawnType#EVENT})
-     * PlayerMob spawn embodies a stored past life instead of a fresh random mob. The
-     * single tunable for that behaviour — the mod has no config system and expresses
-     * every probability as a named constant (cf. {@code PlayerMobEntity.URL_SKIN_CHANCE}).
-     * Composes on top of Dungeon Train's own "1-in-N" decision to spawn a group at all.
+     * Separate per-spawn chances that a Dungeon-Train ({@link net.minecraft.world.entity.MobSpawnType#EVENT})
+     * PlayerMob embodies a stored past life instead of a fresh mob: one slice for a <em>local</em>
+     * life (the player's own death log) and an equal, independent slice for a <em>remote</em> life
+     * supplied by an integrating mod. They partition the spawn roll ({@code SELF} + {@code REMOTE}
+     * + fresh = 1), so a remote pool never erodes the local self-reincarnation chance. Named
+     * constants in the mod's convention (cf. {@code PlayerMobEntity.URL_SKIN_CHANCE}); compose on
+     * top of Dungeon Train's own "1-in-N" decision to spawn a group at all.
      */
-    public static final float REINCARNATION_SPAWN_CHANCE = 0.25F; // 1-in-4 EVENT PlayerMobs attempt to embody a stored past life (echo when an eligible one exists)
+    public static final float SELF_REINCARNATION_CHANCE = 0.25F;   // 1-in-4 EVENT spawns try a LOCAL past life (self allowed)
+    public static final float REMOTE_REINCARNATION_CHANCE = 0.25F; // a further 1-in-4 try a REMOTE past life (never the live player)
 
     /** Slots copied verbatim from the dead player onto the reincarnated mob. */
     private static final EquipmentSlot[] WORN_SLOTS = {
@@ -88,8 +94,9 @@ public final class PlayerReincarnation {
             List<CompoundTag> friends = captureFriendSnapshots(level, player);
             GlobalLifeStore global = GlobalLifeStore.get(level.getServer());
             global.append(player.getUUID(), player.getGameProfile().getName(), carriage, snapshot, friends);
-            // A new life begins on respawn — all past lives are available to meet again.
-            global.resetSession(player.getUUID());
+            // A new life begins on respawn — clear which past lives this player has already met,
+            // so every life across the whole reincarnation pool is available to meet again.
+            ReincarnationSources.resetSession(player.getUUID());
         } catch (RuntimeException e) {
             LOGGER.error("[playermob] failed to snapshot reincarnation for {}", player.getGameProfile().getName(), e);
         }
@@ -114,35 +121,45 @@ public final class PlayerReincarnation {
     }
 
     /**
-     * With probability {@link #REINCARNATION_SPAWN_CHANCE}, turn a freshly-created
-     * Dungeon-Train PlayerMob into a stored past life; returns the embodied
-     * {@link GlobalLifeStore.DeathRecord} (whose {@code friendSnapshots} the caller may replay as a
+     * Turn a freshly-created Dungeon-Train PlayerMob into a stored past life; returns the embodied
+     * {@link ReincarnationRecord} (whose {@code friendSnapshots} the caller may replay as a
      * friend-echo), or {@code null} if it stayed a fresh mob.
      * Called from {@link PlayerMobEntity#finalizeSpawn} for {@code EVENT} spawns,
      * <em>before</em> the default skin/trait rolls — applying the snapshot via
      * {@code readAdditionalSaveData} pins the skin and traits explicit so those rolls
      * become no-ops (the same mechanism the reincarnation egg relies on).
      *
-     * <p>The life is drawn from the global death log by {@link GlobalLifeStore#pickEchoFor}:
-     * deaths within {@link GlobalLifeStore#CARRIAGE_RADIUS} carriages of the spawn that the
-     * nearest player hasn't met this life, weighted toward newer deaths. No eligible life
-     * (empty band / all met / unresolved carriage) returns {@code null} so the spawn falls
-     * back to a normal random PlayerMob. Never throws into the spawn flow.</p>
+     * <p>The spawn roll is partitioned into two independent slices so the pools never compete: with
+     * probability {@link #SELF_REINCARNATION_CHANCE} the mob embodies a <em>local</em> life (the
+     * player's own death log, self included), else with probability {@link #REMOTE_REINCARNATION_CHANCE}
+     * a <em>remote</em> life supplied by an integrating mod (never the live player themselves), else
+     * it stays a fresh mob. Within the chosen pool the life is drawn for this spawn's carriage depth —
+     * deaths within {@link GlobalLifeStore#CARRIAGE_RADIUS} carriages that the nearest player hasn't
+     * met this life, weighted toward newer deaths and nearer carriages. An empty chosen pool returns
+     * {@code null} (no cross-pool borrow) so the spawn falls back to a fresh PlayerMob. Never throws
+     * into the spawn flow.</p>
      */
-    public static GlobalLifeStore.DeathRecord maybeReincarnateOnSpawn(PlayerMobEntity mob, ServerLevelAccessor world) {
+    public static ReincarnationRecord maybeReincarnateOnSpawn(PlayerMobEntity mob, ServerLevelAccessor world) {
         try {
-            if (world.getRandom().nextFloat() >= REINCARNATION_SPAWN_CHANCE) {
-                return null;
-            }
             ServerLevel level = world.getLevel();
             int spawnCarriage = TrainConfinement.spawnCarriageIndex(mob);
             // The nearest player owns the "met this life" set that gates reuse (singleplayer = the player).
             Player nearest = level.getNearestPlayer(mob, -1.0);
             UUID owner = nearest == null ? null : nearest.getUUID();
-            GlobalLifeStore store = GlobalLifeStore.get(level.getServer());
-            GlobalLifeStore.DeathRecord echo = store.pickEchoFor(owner, spawnCarriage, world.getRandom());
-            if (echo == null) {
+            ReincarnationQuery query = ReincarnationQuery.byCarriage(spawnCarriage, owner);
+            // Two separate slices — [0,SELF) a local life, [SELF,SELF+REMOTE) a remote one — so a
+            // remote pool never eats into the local self-reincarnation chance; the rest stays fresh.
+            float roll = world.getRandom().nextFloat();
+            ReincarnationRecord echo;
+            if (roll < SELF_REINCARNATION_CHANCE) {
+                echo = ReincarnationSources.pick(level.getServer(), query, world.getRandom(), false).orElse(null);
+            } else if (roll < SELF_REINCARNATION_CHANCE + REMOTE_REINCARNATION_CHANCE) {
+                echo = ReincarnationSources.pick(level.getServer(), query, world.getRandom(), true).orElse(null);
+            } else {
                 return null;
+            }
+            if (echo == null) {
+                return null; // the chosen pool had no eligible life — stay a fresh mob
             }
             mob.readAdditionalSaveData(echo.snapshot().copy());
             // Name the echo after the past life so it reads as a returning soul — and,
