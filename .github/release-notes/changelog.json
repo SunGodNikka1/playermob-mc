@@ -81,9 +81,9 @@
         "New compat API: TrainConfinement.setMarchDirection(mob, dir) plus PlayerMobEntity.setTrainExploreDir(int)."
       ],
       "date": "2026-06-20",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.45.0",
+      "released_at": "2026-06-20T07:12:12Z"
     }
   ]
 }
