@@ -247,9 +247,9 @@
         "The right-click editor menu (Creative) renders correctly again on 26.2 \u2014 relationship portraits show as placeholder squares there for now"
       ],
       "date": "2026-06-24",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.55.0",
+      "released_at": "2026-06-24T23:59:36Z"
     }
   ]
 }
