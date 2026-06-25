@@ -281,9 +281,9 @@
       ],
       "pr": 121,
       "date": "2026-06-25",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.58.0",
+      "released_at": "2026-06-25T02:20:11Z"
     },
     {
       "id": "relationship-face-262",
