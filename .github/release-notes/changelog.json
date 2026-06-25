@@ -382,9 +382,9 @@
         "punchat faces you and throws 2\u20136 visible punches"
       ],
       "date": "2026-06-25",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.63.1",
+      "released_at": "2026-06-25T11:15:16Z"
     }
   ]
 }
