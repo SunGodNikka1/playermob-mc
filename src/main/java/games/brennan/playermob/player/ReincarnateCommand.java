@@ -18,6 +18,9 @@ import games.brennan.playermob.entity.PlayerMobSummon;
 import games.brennan.playermob.entity.goal.AttackOrder;
 import games.brennan.playermob.entity.goal.Order;
 import games.brennan.playermob.entity.goal.OrderType;
+import games.brennan.playermob.skin.LocalSkinFolder;
+import games.brennan.playermob.skin.LocalSkinRef;
+import games.brennan.playermob.skin.PlayerMobSkinRegistry;
 import games.brennan.playermob.skin.PlayerSkinResolver;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
@@ -59,9 +62,11 @@ import java.util.Collection;
  *   <li>{@code /playermob life <player>} — read the in-progress life tally and the
  *       traits it would currently distil to (verify tracking without dying).</li>
  *   <li>{@code /playermob summon <displayName> [<pos>] [<friendliness>] [<fightFlight>] [named [<customName>]]}
- *       — spawn a PlayerMob wearing that player's resolved skin, at an optional position (default: the
- *       command source), with optional locked traits (default: random). Append {@code named} to also give
- *       the mob a nameplate — {@code customName} if supplied, otherwise {@code displayName}.</li>
+ *       — spawn a PlayerMob wearing that skin, at an optional position (default: the command source), with
+ *       optional locked traits (default: random). {@code displayName} is a local-folder skin name (a PNG in
+ *       {@code config/playermob/skins}) if one matches, otherwise a player name whose skin is resolved.
+ *       Append {@code named} to also give the mob a nameplate — {@code customName} if supplied, otherwise
+ *       {@code displayName}.</li>
  *   <li>{@code /playermob debug spawnlog [on|off]} — toggle (or report) the colour-coded
  *       Dungeon-Train auto-spawn chat log for this session.</li>
  *   <li>{@code /playermob unlimitedammo [on|off]} — toggle (or report) global unlimited ammo for
@@ -73,6 +78,10 @@ import java.util.Collection;
  *       (the chance a PlayerMob spawns <em>beside</em> it on a natural spawn) for this session.</li>
  *   <li>{@code /playermob naturalspawn group <group> on|off|<chance>} — set every mob in a group
  *       (hostile / nether / animals / friendly / water / villager) for this session.</li>
+ *   <li>{@code /playermob skin sources} — report which skin sources (bundled / online / local) a random
+ *       PlayerMob may draw from, with counts.</li>
+ *   <li>{@code /playermob skin source <bundled|online|local> on|off} — toggle one skin source for this
+ *       session.</li>
  * </ul>
  *
  * <p>Like {@code spawnlog}, the {@code naturalspawn} edits are session overrides — they take effect
@@ -101,6 +110,8 @@ public final class ReincarnateCommand {
                         .executes(ReincarnateCommand::life)))
                 .then(Commands.literal("summon")
                     .then(Commands.argument("displayName", StringArgumentType.word())
+                        // Suggest local-folder skin names (you can also type any player name).
+                        .suggests(LOCAL_SKIN_SUGGESTIONS)
                         .executes(ctx -> summon(ctx, false))
                         // `named [<customName>]` gives the mob a nameplate (defaults to displayName);
                         // attached at every level so it can follow any arg combo. Literals bind before
@@ -151,7 +162,8 @@ public final class ReincarnateCommand {
                             .then(Commands.literal("on").executes(ctx -> setGroup(ctx, null)))
                             .then(Commands.literal("off").executes(ctx -> setGroup(ctx, 0.0F)))
                             .then(Commands.argument("chance", FloatArgumentType.floatArg(0.0F, 1.0F))
-                                .executes(ctx -> setGroup(ctx, FloatArgumentType.getFloat(ctx, "chance"))))))));
+                                .executes(ctx -> setGroup(ctx, FloatArgumentType.getFloat(ctx, "chance")))))))
+                .then(skinTree()));
     }
 
     /** Lower-case group names for {@code /playermob naturalspawn group <group>} tab-completion. */
@@ -163,6 +175,75 @@ public final class ReincarnateCommand {
             names.add(g.name().toLowerCase(java.util.Locale.ROOT));
         }
         return java.util.List.copyOf(names);
+    }
+
+    // ---- /playermob skin ... --------------------------------------------------------------------
+
+    /** Tab-completion for {@code /playermob skin spawn <file>}: the base names in config/playermob/skins. */
+    private static final SuggestionProvider<CommandSourceStack> LOCAL_SKIN_SUGGESTIONS = (ctx, builder) ->
+        SharedSuggestionProvider.suggest(LocalSkinFolder.list(), builder);
+
+    /**
+     * The {@code /playermob skin} subtree:
+     * <ul>
+     *   <li>{@code skin sources} — report which of the three skin sources (bundled / online / local)
+     *       a random PlayerMob may draw from, with counts.</li>
+     *   <li>{@code skin source <bundled|online|local> on|off} — toggle one source for this session.</li>
+     * </ul>
+     *
+     * <p>To <em>spawn</em> a mob wearing a specific local skin, use {@code /playermob summon <file>}
+     * (same command as a named-player summon — a local-folder name takes precedence over a player name).</p>
+     */
+    private static LiteralArgumentBuilder<CommandSourceStack> skinTree() {
+        return Commands.literal("skin")
+            .then(Commands.literal("sources").executes(ReincarnateCommand::reportSkinSources))
+            .then(Commands.literal("source")
+                .then(skinSourceToggle("bundled"))
+                .then(skinSourceToggle("online"))
+                .then(skinSourceToggle("local")));
+    }
+
+    /** One {@code <source> on|off} branch for {@link #skinTree()} (built fresh per call site). */
+    private static LiteralArgumentBuilder<CommandSourceStack> skinSourceToggle(String source) {
+        return Commands.literal(source)
+            .then(Commands.literal("on").executes(ctx -> setSkinSource(ctx, source, true)))
+            .then(Commands.literal("off").executes(ctx -> setSkinSource(ctx, source, false)));
+    }
+
+    /** {@code /playermob skin sources} — report each source's on/off state and how many skins it has. */
+    private static int reportSkinSources(CommandContext<CommandSourceStack> ctx) {
+        boolean bundled = PlayerMobConfig.skinSourceBundled();
+        boolean online = PlayerMobConfig.skinSourceOnline();
+        boolean local = PlayerMobConfig.skinSourceLocal();
+        int onlineCount = PlayerMobSkinRegistry.size();
+        int localCount = LocalSkinFolder.list().size();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob skin sources — bundled " + onOff(bundled)
+                + ", online " + onOff(online) + " (" + onlineCount + ")"
+                + ", local " + onOff(local) + " (" + localCount + " in config/playermob/skins)."), false);
+        return 1;
+    }
+
+    /** {@code /playermob skin source <source> on|off} — flip one skin source for this session. */
+    private static int setSkinSource(CommandContext<CommandSourceStack> ctx, String source, boolean enabled) {
+        switch (source) {
+            case "bundled" -> PlayerMobConfig.setSkinSourceBundled(enabled);
+            case "online" -> PlayerMobConfig.setSkinSourceOnline(enabled);
+            case "local" -> PlayerMobConfig.setSkinSourceLocal(enabled);
+            default -> {
+                ctx.getSource().sendFailure(Component.literal("Unknown skin source '" + source + "'."));
+                return 0;
+            }
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "PlayerMob skin source " + source + " " + (enabled ? "enabled" : "disabled")
+                + " for this session."), false);
+        return 1;
+    }
+
+    /** "ON"/"OFF" label for source-state reporting. */
+    private static String onOff(boolean on) {
+        return on ? "ON" : "OFF";
     }
 
     // ---- /playermob order <name> <action> <target> ----------------------------------------------
@@ -921,21 +1002,31 @@ public final class ReincarnateCommand {
             mob.setCustomName(Component.literal(customName));
             mob.setCustomNameVisible(true);
         }
-        // Resolve the named player's skin off-thread; apply on the server thread when it lands.
-        MinecraftServer server = source.getServer();
-        PlayerSkinResolver.resolveAsync(server, name, opt -> {
-            if (mob.isRemoved()) {
-                return;
-            }
-            opt.ifPresent(resolved -> {
-                mob.setSkinTextureUrl(resolved.url());
-                mob.setSkinSlim(resolved.slim());
+        // A local-folder skin (a PNG in config/playermob/skins) takes precedence: if <displayName>
+        // names one, the mob wears it immediately. Otherwise <displayName> is treated as a player
+        // name and that player's skin is resolved off-thread, applied when it lands.
+        boolean localSkin = LocalSkinFolder.resolve(name) != null;
+        if (localSkin) {
+            mob.setSkinTextureUrl(LocalSkinRef.encode(name));
+        } else {
+            MinecraftServer server = source.getServer();
+            PlayerSkinResolver.resolveAsync(server, name, opt -> {
+                if (mob.isRemoved()) {
+                    return;
+                }
+                opt.ifPresent(resolved -> {
+                    mob.setSkinTextureUrl(resolved.url());
+                    mob.setSkinSlim(resolved.slim());
+                });
             });
-        });
-        String label = customName != null
-            ? "Summoned a PlayerMob named \"" + customName + "\" for " + name
-            : "Summoned a PlayerMob for " + name;
-        source.sendSuccess(() -> Component.literal(label + " — resolving skin…"), true);
+        }
+        String who = customName != null
+            ? "Summoned a PlayerMob named \"" + customName + "\""
+            : "Summoned a PlayerMob";
+        String label = localSkin
+            ? who + " wearing local skin '" + name + "'."
+            : who + " for " + name + " — resolving skin…";
+        source.sendSuccess(() -> Component.literal(label), true);
         return 1;
     }
 
