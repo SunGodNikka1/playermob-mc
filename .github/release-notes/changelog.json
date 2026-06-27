@@ -464,9 +464,9 @@
       "summary": "The mod's unit-test suite now runs automatically across all supported Minecraft versions (1.20.1, 1.21.1, and the 26.x preview) on every change, so cross-version regressions get caught before a build ever ships.",
       "highlights": [],
       "date": "2026-06-27",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.69.0",
+      "released_at": "2026-06-27T14:57:15Z"
     },
     {
       "id": "natural-spawn-per-mob-config-fix",
@@ -481,9 +481,9 @@
       ],
       "pr": 147,
       "date": "2026-06-27",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.69.0",
+      "released_at": "2026-06-27T14:57:15Z"
     }
   ]
 }
