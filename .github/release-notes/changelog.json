@@ -497,9 +497,9 @@
       ],
       "pr": 149,
       "date": "2026-06-28",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.70.0",
+      "released_at": "2026-06-28T03:50:59Z"
     }
   ]
 }
