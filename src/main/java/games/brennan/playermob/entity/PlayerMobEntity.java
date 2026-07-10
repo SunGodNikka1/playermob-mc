@@ -26,6 +26,7 @@ import games.brennan.playermob.entity.goal.RaidArmorStandsGoal;
 import games.brennan.playermob.entity.goal.RaidContainersGoal;
 import games.brennan.playermob.entity.goal.SeekAmmoGoal;
 import games.brennan.playermob.entity.goal.SkepticalWatchGoal;
+import games.brennan.playermob.entity.goal.TntCombatGoal;
 import games.brennan.playermob.entity.goal.TrainRecoveryGoal;
 import games.brennan.playermob.entity.goal.WeaponAwareAttackGoal;
 import games.brennan.playermob.player.PlayerLifeRecord;
@@ -695,6 +696,11 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
         // mines fill blocking the march. No flags (like PlayerMobDoorGoal) so it never evicts the
         // advance goal — the mob keeps stepping into the gap as the wall clears. No-op off a train.
         this.goalSelector.addGoal(1, new DigThroughGoal(this));
+        // Carrying TNT + a way to light it? Bomb the enemy instead of trading bow/melee blows — registered
+        // BEFORE the seek/attack goals at the same priority so its canUse() (config on, mobGriefing on, TNT +
+        // an igniter on hand) wins the MOVE slot while armed. When it runs out of TNT/igniters its canUse()
+        // goes false and the normal fight goals take back over. Gated on mobGriefing (it places + primes TNT).
+        this.goalSelector.addGoal(2, new TntCombatGoal(this, /* speed */ 1.0));
         // Out of ammo mid-fight? Fetch a nearby dropped round before fighting — registered BEFORE the attack
         // goal at the same priority so its narrow canUse() (ranged weapon owned, no ammo, enemy not too close,
         // a round within reach) wins the MOVE slot; otherwise the attack goal runs. After a restock its
@@ -3394,11 +3400,15 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     private static final float GUARANTEED_EQUIPMENT_DROP_CHANCE = 2.0F;
 
     /**
-     * On death, drop the entire backpack inventory. Combined with the
-     * guaranteed {@link #getEquipmentDropChance} override below — which makes
-     * {@code super.dropCustomDeathLoot} drop every equipped slot too — the mob
-     * drops everything it was carrying, just like a player. Mirrors
+     * On death, drop the backpack inventory — <em>except</em> its TNT-bombing kit. Combined with the
+     * guaranteed {@link #getEquipmentDropChance} override below — which makes {@code super.dropCustomDeathLoot}
+     * drop every equipped slot too — the mob drops what it was carrying, just like a player. Mirrors
      * {@code Pillager.dropCustomDeathLoot} for the backpack half.
+     *
+     * <p><b>TNT kit is not lootable:</b> a PlayerMob never drops TNT, and while it still carries TNT it also
+     * keeps its igniters (flint &amp; steel / fire charge / redstone block / lever / button / pressure plate) —
+     * so killing a bomber doesn't hand the player a pile of explosives and the means to set them off. Once its
+     * TNT is spent the igniters are just ordinary tools again and drop normally. See {@link TntCombatPolicy}.</p>
      */
     //? if >=1.21.1 {
     @Override
@@ -3409,11 +3419,17 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
     protected void dropCustomDeathLoot(DamageSource source, int looting, boolean recentlyHit) {
         super.dropCustomDeathLoot(source, looting, recentlyHit);
     *///?}
+        boolean carriesTnt = TntCombatPolicy.firstTntSlot(this.inventory) >= 0;
         for (int i = 0; i < this.inventory.getContainerSize(); i++) {
             ItemStack stack = this.inventory.getItem(i);
-            if (!stack.isEmpty()) {
-                this.dropAtLocation(stack);
+            if (stack.isEmpty()) {
+                continue;
             }
+            // Never drop TNT; keep the igniters too while the mob still has TNT to use them on.
+            if (stack.is(Items.TNT) || (carriesTnt && TntCombatPolicy.isIgniter(stack))) {
+                continue;
+            }
+            this.dropAtLocation(stack);
         }
         this.inventory.clearContent();
     }
