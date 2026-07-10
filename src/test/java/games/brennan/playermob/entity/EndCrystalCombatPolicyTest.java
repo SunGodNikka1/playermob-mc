@@ -114,14 +114,6 @@ class EndCrystalCombatPolicyTest {
     }
 
     @Test
-    void kitItemsAreCrystalAndObsidianOnly() {
-        assertTrue(EndCrystalCombatPolicy.isKitItem(new ItemStack(Items.END_CRYSTAL)), "crystal withheld on death");
-        assertTrue(EndCrystalCombatPolicy.isKitItem(new ItemStack(Items.OBSIDIAN)), "obsidian withheld on death");
-        assertFalse(EndCrystalCombatPolicy.isKitItem(new ItemStack(Items.COBBLESTONE)), "plain cover drops normally");
-        assertFalse(EndCrystalCombatPolicy.isKitItem(new ItemStack(Items.DIRT)), "plain cover drops normally");
-    }
-
-    @Test
     void candidatesLeadTargetwardWithCoverBetween() {
         BlockPos mob = new BlockPos(0, 64, 0);
 

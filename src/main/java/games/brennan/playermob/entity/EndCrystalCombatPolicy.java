@@ -127,16 +127,6 @@ public final class EndCrystalCombatPolicy {
             && solidCoverCount(container) >= 3;
     }
 
-    /**
-     * True when {@code stack} is part of the crystal-bombing kit withheld on death — an end crystal (never dropped)
-     * or obsidian (kept while the mob still carries crystals, so a slain bomber doesn't hand the player live
-     * explosives + the means to seat them). A plain cover block (dirt, cobble) is <b>not</b> a kit item and drops
-     * normally.
-     */
-    public static boolean isKitItem(ItemStack stack) {
-        return stack.is(Items.END_CRYSTAL) || stack.is(Items.OBSIDIAN);
-    }
-
     /** The eight horizontal unit directions ({@code dx, dz}), in clockwise order from north. */
     private static final int[][] HORIZONTAL_8 = {
         {0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}
