@@ -582,9 +582,9 @@
       ],
       "pr": 159,
       "date": "2026-07-15",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.76.0",
+      "released_at": "2026-07-15T23:21:09Z"
     },
     {
       "id": "durable-orders",
@@ -599,9 +599,9 @@
         "Each mob remembers its own default timeout / interruptibility (settable via NBT)"
       ],
       "date": "2026-07-15",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.76.0",
+      "released_at": "2026-07-15T23:21:09Z"
     }
   ]
 }
