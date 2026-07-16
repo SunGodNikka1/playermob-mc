@@ -3891,7 +3891,64 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
      * ({@link #equipBestWeaponForTarget}), both ranged combat goals, and {@code SeekAmmoGoal}.
      */
     public boolean hasRangedAmmo(ItemStack weapon) {
+        // Modded firearms always need their real ammo carried — "infinite ammo" (requireArrows=false) can't
+        // synthesize an arbitrary mod's cartridge item, and the fake-player fire drive lends a real round from
+        // the backpack to the mod's own consume logic (see ModdedRangedAttackGoal).
+        if (PlayerMobConfig.moddedRanged().isRangedWeapon(weapon)) {
+            return hasModdedAmmoFor(weapon);
+        }
         return !PlayerMobConfig.requireArrows() || RangedAmmo.hasAmmoFor(this.inventory, weapon);
+    }
+
+    /**
+     * Whether the mob carries ammo the given modded {@code weapon} accepts — in its backpack or its off hand.
+     * The off hand is checked so an admin can arm a mob entirely with commands
+     * ({@code /item replace entity … weapon.offhand with <cartridge>}); the backpack is otherwise fillable only
+     * by floor pickup.
+     */
+    private boolean hasModdedAmmoFor(ItemStack weapon) {
+        if (firstModdedAmmoSlot(weapon) >= 0) {
+            return true;
+        }
+        ItemStack off = getOffhandItem();
+        return !off.isEmpty() && PlayerMobConfig.moddedRanged().ammoMatches(weapon, off);
+    }
+
+    /** First backpack slot holding ammo the given modded ranged {@code weapon} accepts (per config), or -1. */
+    private int firstModdedAmmoSlot(ItemStack weapon) {
+        ModdedRangedWeapons registry = PlayerMobConfig.moddedRanged();
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (!stack.isEmpty() && registry.ammoMatches(weapon, stack)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Consume one round of the modded {@code weapon}'s ammo — from the backpack first, else the off hand. Called
+     * by {@link ModdedRangedAttackGoal} when the mob loads a round to begin its (real-time) reload, so a shot
+     * costs exactly one cartridge. A no-op if the mob carries no matching ammo.
+     */
+    public void consumeOneModdedAmmo(ItemStack weapon) {
+        int slot = firstModdedAmmoSlot(weapon);
+        if (slot >= 0) {
+            ItemStack stack = this.inventory.getItem(slot);
+            stack.shrink(1);
+            if (stack.isEmpty()) {
+                this.inventory.setItem(slot, ItemStack.EMPTY);
+            }
+            this.inventory.setChanged();
+            return;
+        }
+        ItemStack off = getOffhandItem();
+        if (!off.isEmpty() && PlayerMobConfig.moddedRanged().ammoMatches(weapon, off)) {
+            off.shrink(1);
+            if (off.isEmpty()) {
+                setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+            }
+        }
     }
 
     /**
@@ -3923,10 +3980,14 @@ public class PlayerMobEntity extends PathfinderMob implements CrossbowAttackMob,
 
     /**
      * Whether the mob wants {@code stack} as ranged ammo to hoard: arrows always (any ranged weapon may use
-     * them), plus fireworks when it owns a crossbow to fire them with. Drives floor pickup and the ammo seek.
+     * them), fireworks when it owns a crossbow to fire them with, plus any ammo of a configured modded firearm
+     * (cartridges, magazines) so the mob can restock a musket the same way it restocks arrows. Drives floor
+     * pickup and the ammo seek.
      */
     public boolean wantsAsAmmo(ItemStack stack) {
-        return RangedAmmo.isArrow(stack) || (RangedAmmo.isFirework(stack) && ownsCrossbow());
+        return RangedAmmo.isArrow(stack)
+            || (RangedAmmo.isFirework(stack) && ownsCrossbow())
+            || PlayerMobConfig.moddedRanged().isModdedAmmo(stack);
     }
 
     // ---- Sounds (player-like — mirrors vanilla Player exactly) -----------
