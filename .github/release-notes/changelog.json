@@ -650,9 +650,9 @@
       ],
       "pr": 160,
       "date": "2026-07-16",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.80.0",
+      "released_at": "2026-07-16T10:32:12Z"
     },
     {
       "id": "hunt-for-food-toggle",
@@ -666,9 +666,9 @@
       ],
       "pr": 168,
       "date": "2026-07-16",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.80.0",
+      "released_at": "2026-07-16T10:32:12Z"
     },
     {
       "id": "summon-stay-nbt-anchor",
@@ -684,9 +684,9 @@
       ],
       "pr": 170,
       "date": "2026-07-16",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.80.0",
+      "released_at": "2026-07-16T10:32:12Z"
     }
   ]
 }
