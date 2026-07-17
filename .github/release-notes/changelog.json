@@ -699,9 +699,9 @@
         "Plain spawn eggs still roll a varied random skin as before"
       ],
       "date": "2026-07-17",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.82.0",
+      "released_at": "2026-07-17T16:46:33Z"
     }
   ]
 }
