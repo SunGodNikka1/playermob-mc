@@ -716,9 +716,9 @@
       ],
       "pr": 175,
       "date": "2026-07-19",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.83.0",
+      "released_at": "2026-07-19T12:20:34Z"
     },
     {
       "id": "playermob-train-recovery-fixes",
@@ -734,9 +734,9 @@
       ],
       "pr": 177,
       "date": "2026-07-19",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.83.0",
+      "released_at": "2026-07-19T12:20:34Z"
     }
   ]
 }
