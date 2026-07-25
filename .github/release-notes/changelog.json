@@ -751,9 +751,9 @@
         "Where a staircase or ladder already runs up to the track, they use it instead of pillaring up beside it"
       ],
       "date": "2026-07-19",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.85.0",
+      "released_at": "2026-07-25T16:02:01Z"
     },
     {
       "id": "shulker-box-contents",
@@ -767,9 +767,9 @@
         "PlayerMobs never place shulker boxes as bridge, recovery, or combat-cover blocks"
       ],
       "date": "2026-07-25",
-      "released": false,
-      "released_in": null,
-      "released_at": null
+      "released": true,
+      "released_in": "v0.85.0",
+      "released_at": "2026-07-25T16:02:01Z"
     }
   ]
 }
